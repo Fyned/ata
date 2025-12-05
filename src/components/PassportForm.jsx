@@ -1,366 +1,285 @@
 import { useState } from 'react'
 import { supabase } from '../supabase'
+import { Upload, CheckCircle, FileText, User, Mail, Phone, Loader2 } from 'lucide-react'
 
 export default function PassportForm() {
   const [loading, setLoading] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
   
-  // Şirket Bilgileri State
-  const [companyData, setCompanyData] = useState({
-    companyName: '',
-    officeAddress: '',
-    businessActivity: ''
+  // Form Verileri
+  const [formData, setFormData] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    notes: ''
   })
-
-  // Direktörler State
-  const [directors, setDirectors] = useState([
-    { homeAddress: '', niNumber: '', passportFile: null, brpFile: null }
-  ])
-
-  // PSC (Person with Significant Control) State
-  const [pscs, setPscs] = useState([]) 
-
-  // --- HANDLERS ---
-
-  const handleCompanyChange = (e) => {
-    setCompanyData({ ...companyData, [e.target.name]: e.target.value })
-  }
-
-  // Direktör işlemleri
-  const handleDirectorChange = (index, field, value) => {
-    const newDirectors = [...directors]
-    newDirectors[index][field] = value
-    setDirectors(newDirectors)
-  }
   
-  const addDirector = () => {
-    setDirectors([...directors, { homeAddress: '', niNumber: '', passportFile: null, brpFile: null }])
+  // Dosya State'i
+  const [passportFile, setPassportFile] = useState(null)
+
+  // Input Değişikliği
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value })
   }
 
-  // PSC işlemleri
-  const handlePscChange = (index, field, value) => {
-    const newPscs = [...pscs]
-    newPscs[index][field] = value
-    setPscs(newPscs)
+  // Dosya Seçimi
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      setPassportFile(e.target.files[0])
+    }
   }
 
-  const addPsc = () => {
-    setPscs([...pscs, { name: '', address: '', natureOfControl: '' }])
-  }
-
-  // Dosya Yükleme Fonksiyonu
+  // Dosya Yükleme Yardımcısı
   const uploadFile = async (file) => {
-    if (!file) return null
+    if (!file) throw new Error("Lütfen pasaport görselini yükleyiniz.")
+    
+    // Dosya ismini benzersiz yap (çakışmayı önlemek için)
     const fileExt = file.name.split('.').pop()
-    const fileName = `${Math.random()}.${fileExt}`
-    const filePath = `${fileName}`
-
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+    
     const { error } = await supabase.storage
       .from('documents')
-      .upload(filePath, file)
+      .upload(fileName, file)
 
-    if (error) {
-      console.error('Upload hatası:', error)
-      throw error
-    }
+    if (error) throw error
 
-    const { data } = supabase.storage.from('documents').getPublicUrl(filePath)
+    // Public URL al
+    const { data } = supabase.storage.from('documents').getPublicUrl(fileName)
     return data.publicUrl
   }
 
-  // --- FORM SUBMIT ---
+  // --- ANA GÖNDERİM FONKSİYONU ---
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
 
     try {
-      // 1. Şirketi Kaydet
-      const { data: company, error: companyError } = await supabase
-        .from('companies')
+      // 1. Kontrol: Dosya var mı?
+      if (!passportFile) {
+        alert("Lütfen pasaport fotoğrafını yükleyiniz.")
+        setLoading(false)
+        return
+      }
+
+      // 2. Dosyayı Storage'a Yükle
+      const passportUrl = await uploadFile(passportFile)
+
+      // 3. Veriyi Veritabanına Kaydet
+      const { error: dbError } = await supabase
+        .from('applications')
         .insert([{
-          company_name: companyData.companyName,
-          office_address: companyData.officeAddress,
-          business_activity: companyData.businessActivity
+          full_name: formData.fullName,
+          email: formData.email,
+          phone: formData.phone,
+          notes: formData.notes,
+          passport_url: passportUrl
         }])
-        .select()
-        .single()
 
-      if (companyError) throw companyError
-      const companyId = company.id
+      if (dbError) throw dbError
 
-      // 2. Direktörleri Kaydet
-      for (const dir of directors) {
-        let passportUrl = null
-        let brpUrl = null
+      // 4. Mail Gönder (Edge Function Tetikle)
+      console.log("Mail gönderimi başlatılıyor...")
+      
+      const { error: mailError } = await supabase.functions.invoke('send-application-email', {
+        body: {
+          fullName: formData.fullName,
+          email: formData.email,
+          phone: formData.phone,
+          notes: formData.notes,
+          passportUrl: passportUrl
+        }
+      })
 
-        if (dir.passportFile) passportUrl = await uploadFile(dir.passportFile)
-        if (dir.brpFile) brpUrl = await uploadFile(dir.brpFile)
-
-        const { error: dirError } = await supabase.from('directors').insert([{
-          company_id: companyId,
-          home_address: dir.homeAddress,
-          ni_number: dir.niNumber,
-          passport_url: passportUrl,
-          brp_url: brpUrl
-        }])
-        if (dirError) throw dirError
+      if (mailError) {
+        console.error("Mail gönderme hatası:", mailError)
+        // Kritik hata değil, veritabanına kayıt yapıldı. Kullanıcıya hissettirmeden devam edebiliriz
+        // veya loglara bakabiliriz.
+      } else {
+        console.log("Mail başarıyla tetiklendi.")
       }
 
-      // 3. PSC'leri Kaydet
-      for (const psc of pscs) {
-        const { error: pscError } = await supabase.from('pscs').insert([{
-          company_id: companyId,
-          name: psc.name,
-          address: psc.address,
-          nature_of_control: psc.natureOfControl
-        }])
-        if (pscError) throw pscError
-      }
-
-      alert('Başvuru başarıyla alındı! Bilgiler veritabanına kaydedildi.')
-      // Başarılı işlem sonrası formu temizle
-      setCompanyData({ companyName: '', officeAddress: '', businessActivity: '' })
-      setDirectors([{ homeAddress: '', niNumber: '', passportFile: null, brpFile: null }])
-      setPscs([])
+      // 5. Başarılı Ekranına Geç
+      setSubmitted(true)
 
     } catch (error) {
-      alert('Hata oluştu: ' + error.message)
-      console.error(error)
+      console.error("Form gönderim hatası:", error)
+      alert('Bir hata oluştu: ' + error.message)
     } finally {
       setLoading(false)
     }
   }
 
-  return (
-    <div className="min-h-screen w-full bg-slate-50 relative overflow-hidden">
-      {/* Mask Image düzeltildi */}
-      <div className="absolute inset-0 bg-grid-slate-200 mask-[linear-gradient(to_bottom,white_20%,transparent_100%)]"></div>
-      
-      {/* Dil Butonu */}
-      <div className="absolute top-4 right-4 z-20">
-        <button className="justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none border border-slate-200 hover:bg-slate-100 h-10 px-4 py-2 flex items-center gap-2 bg-white/80 backdrop-blur-sm" type="button">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-            <circle cx="12" cy="12" r="10"></circle><line x1="2" x2="22" y1="12" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-          </svg>
-          <span>🇬🇧 English</span>
-        </button>
-      </div>
-
-      <main className="container mx-auto px-4 py-16 sm:py-24 relative z-10">
-        <div className="max-w-4xl mx-auto space-y-12">
-          
-          {/* Header */}
-          <div className="text-center space-y-4">
-            <img src="https://ataaccountancy.com/wp-content/uploads/2025/08/ata-full-logo.svg" alt="ATA Accountancy Logo" className="mx-auto h-16 w-auto" />
-            <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">Company Information Form</h1>
-            <p className="text-lg text-slate-600 max-w-3xl mx-auto">We will assist you with the establishment of your new venture. To ensure a seamless process, we kindly request the following information from you:</p>
+  // --- BAŞARILI EKRANI ---
+  if (submitted) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="bg-white p-10 rounded-2xl shadow-2xl max-w-lg w-full text-center border border-slate-100">
+          <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <CheckCircle className="w-10 h-10 text-green-600" />
           </div>
+          <h2 className="text-3xl font-bold text-slate-800 mb-4">Başvurunuz Alındı!</h2>
+          <p className="text-slate-600 mb-8 text-lg">
+            Pasaportunuz ve bilgileriniz güvenli bir şekilde bize ulaştı. En kısa sürede inceleyip dönüş yapacağız.
+          </p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="text-blue-600 font-semibold hover:underline text-lg"
+          >
+            Yeni bir başvuru yap
+          </button>
+        </div>
+      </div>
+    )
+  }
 
-          <form onSubmit={handleSubmit} className="space-y-12">
+  // --- FORM EKRANI ---
+  return (
+    <div className="min-h-screen w-full bg-slate-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 font-sans">
+      <div className="max-w-4xl w-full space-y-8 bg-white p-8 sm:p-12 rounded-3xl shadow-2xl border border-slate-200">
+        
+        {/* Header */}
+        <div className="text-center">
+          <div className="flex justify-center mb-6">
+             <div className="h-20 w-20 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 transform rotate-3">
+                <FileText className="text-white w-10 h-10" />
+             </div>
+          </div>
+          <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight mb-3">Hızlı Pasaport Gönderimi</h1>
+          <p className="text-lg text-slate-500 max-w-2xl mx-auto">
+            İşlemlerinizi başlatmak için lütfen aşağıdaki formu eksiksiz doldurun.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="mt-8 space-y-8">
+          
+          {/* İki Kolonlu Yapı */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
             
-            {/* --- SECTION 1: COMPANY --- */}
-            <div className="rounded-lg border border-slate-200/80 overflow-hidden shadow-xl bg-white/80 backdrop-blur-sm hover:shadow-2xl transition-shadow duration-300">
-              <div className="flex flex-col space-y-1.5 p-6 bg-slate-50/80 border-b border-slate-200/80">
-                <h3 className="font-semibold tracking-tight flex items-center gap-3 text-2xl text-slate-800">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600">
-                    <rect width="16" height="20" x="4" y="2" rx="2" ry="2"></rect><path d="M9 22v-4h6v4"></path><path d="M8 6h.01"></path><path d="M16 6h.01"></path><path d="M12 6h.01"></path><path d="M12 10h.01"></path><path d="M12 14h.01"></path><path d="M16 10h.01"></path><path d="M16 14h.01"></path><path d="M8 10h.01"></path><path d="M8 14h.01"></path>
-                  </svg> 
-                  For the Company
-                </h3>
+            {/* Sol Taraf: Dosya Yükleme */}
+            <div className="space-y-4">
+              <label className="block text-sm font-bold text-slate-700">Pasaport Görseli / PDF <span className="text-red-500">*</span></label>
+              <div className={`h-64 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center text-center p-6 transition-all duration-300 cursor-pointer group
+                ${passportFile ? 'border-green-500 bg-green-50' : 'border-slate-300 hover:border-blue-500 hover:bg-slate-50'}`}>
+                <input 
+                  type="file" 
+                  id="passport-upload" 
+                  accept="image/*,.pdf" 
+                  onChange={handleFileChange} 
+                  className="hidden" 
+                />
+                <label htmlFor="passport-upload" className="w-full h-full flex flex-col items-center justify-center cursor-pointer">
+                  {passportFile ? (
+                    <>
+                      <CheckCircle className="w-12 h-12 text-green-500 mb-4" />
+                      <span className="text-sm font-semibold text-green-700 break-all px-4">{passportFile.name}</span>
+                      <span className="text-xs text-green-600 mt-2 bg-green-200 px-2 py-1 rounded-full">Değiştir</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                        <Upload className="w-8 h-8" />
+                      </div>
+                      <span className="text-base font-medium text-slate-700">Yüklemek için tıklayın veya sürükleyin</span>
+                      <span className="text-sm text-slate-400 mt-2">JPG, PNG, PDF (Maks 5MB)</span>
+                    </>
+                  )}
+                </label>
               </div>
-              <div className="p-6 space-y-6">
-                <div>
-                  <label className="text-sm font-medium leading-none block mb-2" htmlFor="companyName">Company Name</label>
+            </div>
+
+            {/* Sağ Taraf: Form Bilgileri */}
+            <div className="space-y-5">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Ad Soyad <span className="text-red-500">*</span></label>
+                <div className="relative">
+                  <div className="absolute left-3 top-3.5 h-5 w-5 flex items-center justify-center pointer-events-none">
+                    <User className="h-5 w-5 text-slate-400" />
+                  </div>
                   <input 
-                    className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                    id="companyName" 
-                    name="companyName" 
-                    placeholder="Proposed Name for Your Company"
-                    value={companyData.companyName}
-                    onChange={handleCompanyChange}
-                    required
+                    type="text" 
+                    name="fullName" 
+                    required 
+                    value={formData.fullName} 
+                    onChange={handleChange}
+                    className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 focus:bg-white transition-colors"
+                    placeholder="Pasaporttaki tam adınız" 
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium leading-none block mb-2" htmlFor="officeAddress">Registered Office Address</label>
-                  <textarea 
-                    className="flex min-h-20 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                    id="officeAddress" 
-                    name="officeAddress" 
-                    placeholder="Full address of the company"
-                    value={companyData.officeAddress}
-                    onChange={handleCompanyChange}
-                    required
-                  ></textarea>
-                </div>
-                <div>
-                  <label className="text-sm font-medium leading-none block mb-2" htmlFor="businessActivity">Business Activity</label>
-                  <textarea 
-                    className="flex min-h-20 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                    id="businessActivity" 
-                    name="businessActivity" 
-                    placeholder="Primary Activities/Nature of Business"
-                    value={companyData.businessActivity}
-                    onChange={handleCompanyChange}
-                    required
-                  ></textarea>
-                </div>
               </div>
-            </div>
 
-            {/* --- SECTION 2: DIRECTORS --- */}
-            <div className="rounded-lg border border-slate-200/80 overflow-hidden shadow-xl bg-white/80 backdrop-blur-sm hover:shadow-2xl transition-shadow duration-300">
-              <div className="flex flex-col space-y-1.5 p-6 bg-slate-50/80 border-b border-slate-200/80">
-                <h3 className="font-semibold tracking-tight flex items-center gap-3 text-2xl text-slate-800">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600">
-                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-                  </svg> 
-                  For the Directors
-                </h3>
-                <p className="text-sm text-slate-500">If Shareholder is Different</p>
-              </div>
-              
-              <div className="p-6 space-y-8">
-                {directors.map((dir, index) => (
-                  <div key={index} className="p-6 border border-slate-200 rounded-lg bg-white space-y-6 relative shadow-sm">
-                    <h4 className="font-semibold text-lg text-slate-700">Director {index + 1}</h4>
-                    <div>
-                      <label className="text-sm font-medium leading-none block mb-2">Home Address</label>
-                      <textarea 
-                        className="flex min-h-20 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                        placeholder="Residential Address of Each Director"
-                        value={dir.homeAddress}
-                        onChange={(e) => handleDirectorChange(index, 'homeAddress', e.target.value)}
-                        required
-                      ></textarea>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium leading-none block mb-2">National Insurance (NI) Number</label>
-                      <input 
-                        className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                        placeholder="NI Number of Each Director"
-                        value={dir.niNumber}
-                        onChange={(e) => handleDirectorChange(index, 'niNumber', e.target.value)}
-                        required
-                      />
-                    </div>
-                    
-                    {/* Passport Warning/Upload */}
-                    <div className="p-4 bg-amber-50 border-l-4 border-amber-400 text-amber-800 rounded-r-lg">
-                      <div className="flex items-start">
-                        {/* shrink-0 düzeltildi */}
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 mr-3 mt-1 shrink-0">
-                          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line>
-                        </svg>
-                        <div className="w-full">
-                          <p className="font-bold">Passport</p>
-                          <p className="text-sm mb-2">Please attach the passport document.</p>
-                          <input type="file" accept="image/*,.pdf" onChange={(e) => handleDirectorChange(index, 'passportFile', e.target.files[0])} className="text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-100 file:text-amber-700 hover:file:bg-amber-200"/>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* BRP Warning/Upload */}
-                    <div className="p-4 bg-sky-50 border-l-4 border-sky-400 text-sky-800 rounded-r-lg">
-                      <div className="flex items-start">
-                        {/* shrink-0 düzeltildi */}
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 mr-3 mt-1 shrink-0">
-                          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line>
-                        </svg>
-                        <div className="w-full">
-                          <p className="font-bold">Biometric Residence Permit (BRP)</p>
-                          <p className="text-sm mb-2">If applicable, please attach the document.</p>
-                          <input type="file" accept="image/*,.pdf" onChange={(e) => handleDirectorChange(index, 'brpFile', e.target.files[0])} className="text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-sky-100 file:text-sky-700 hover:file:bg-sky-200"/>
-                        </div>
-                      </div>
-                    </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">E-posta <span className="text-red-500">*</span></label>
+                <div className="relative">
+                  <div className="absolute left-3 top-3.5 h-5 w-5 flex items-center justify-center pointer-events-none">
+                    <Mail className="h-5 w-5 text-slate-400" />
                   </div>
-                ))}
-                
-                <button onClick={addDirector} className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 h-10 px-4 py-2 w-full gap-2 transition-colors" type="button">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" x2="19" y1="8" y2="14"></line><line x1="22" x2="16" y1="11" y2="11"></line>
-                  </svg> 
-                  Add Another Director
-                </button>
-              </div>
-            </div>
-
-            {/* --- SECTION 3: PSC (Person with Significant Control) --- */}
-            <div className="rounded-lg border border-slate-200/80 overflow-hidden shadow-xl bg-white/80 backdrop-blur-sm hover:shadow-2xl transition-shadow duration-300">
-              <div className="flex flex-col space-y-1.5 p-6 bg-slate-50/80 border-b border-slate-200/80">
-                <h3 className="font-semibold tracking-tight flex items-center gap-3 text-2xl text-slate-800">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"></path>
-                  </svg> 
-                  For Person(s) with Significant Control
-                </h3>
-                <p className="text-sm text-slate-500">Where Applicable</p>
-              </div>
-              <div className="p-6 space-y-8">
-                <div className="bg-blue-50 border-l-4 border-blue-400 text-blue-800 p-4 rounded-r-lg" role="alert">
-                  <p className="font-bold flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-                      <circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path>
-                    </svg> 
-                    Note
-                  </p>
-                  <p> If the person with significant control is not a director, shareholder, or secretary, kindly provide the above information for their records.</p>
+                  <input 
+                    type="email" 
+                    name="email" 
+                    required 
+                    value={formData.email} 
+                    onChange={handleChange}
+                    className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 focus:bg-white transition-colors"
+                    placeholder="ornek@email.com" 
+                  />
                 </div>
-                
-                {/* PSC Listesi */}
-                {pscs.map((psc, index) => (
-                  <div key={index} className="p-6 border border-slate-200 rounded-lg bg-white space-y-4 relative shadow-sm">
-                     <h4 className="font-semibold text-lg text-slate-700">PSC Person {index + 1}</h4>
-                     <input 
-                       placeholder="Full Name" 
-                       className="flex h-10 w-full rounded-md border border-slate-300 px-3" 
-                       value={psc.name} 
-                       onChange={(e) => handlePscChange(index, 'name', e.target.value)}
-                     />
-                     <textarea 
-                       placeholder="Address" 
-                       className="flex min-h-20 w-full rounded-md border border-slate-300 px-3 py-2"
-                       value={psc.address}
-                       onChange={(e) => handlePscChange(index, 'address', e.target.value)}
-                     ></textarea>
-                     <input 
-                       placeholder="Nature of Control" 
-                       className="flex h-10 w-full rounded-md border border-slate-300 px-3"
-                       value={psc.natureOfControl}
-                       onChange={(e) => handlePscChange(index, 'natureOfControl', e.target.value)}
-                     />
-                  </div>
-                ))}
+              </div>
 
-                <button onClick={addPsc} className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 h-10 px-4 py-2 w-full gap-2 transition-colors" type="button">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" x2="19" y1="8" y2="14"></line><line x1="22" x2="16" y1="11" y2="11"></line>
-                  </svg> 
-                  Add Person with Significant Control
-                </button>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Telefon</label>
+                <div className="relative">
+                  <div className="absolute left-3 top-3.5 h-5 w-5 flex items-center justify-center pointer-events-none">
+                    <Phone className="h-5 w-5 text-slate-400" />
+                  </div>
+                  <input 
+                    type="tel" 
+                    name="phone" 
+                    value={formData.phone} 
+                    onChange={handleChange}
+                    className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 focus:bg-white transition-colors"
+                    placeholder="+90 555 000 0000" 
+                  />
+                </div>
               </div>
             </div>
+          </div>
 
-            <div className="text-center space-y-6 pt-8">
-              <p className="text-slate-600 max-w-3xl mx-auto">Your prompt provision of this information will facilitate the swift processing of your company registration. Once we receive the required details, we will proceed with the necessary steps and keep you informed of the progress.</p>
-              <button 
-                type="submit" 
-                disabled={loading}
-                className="inline-flex items-center justify-center font-medium bg-blue-600 text-white hover:bg-blue-700 h-11 rounded-md gap-2 text-lg py-6 px-8 shadow-lg hover:shadow-blue-600/40 transition-all duration-300 disabled:opacity-50"
-              >
-                {loading ? 'Sending...' : (
-                  <>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-                    <path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path>
-                  </svg>
-                  Send Information
-                  </>
-                )}
-              </button>
+          {/* Alt Kısım: Notlar ve Buton */}
+          <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">Notlar (Opsiyonel)</label>
+              <textarea 
+                name="notes" 
+                rows="3" 
+                value={formData.notes} 
+                onChange={handleChange}
+                className="block w-full p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 focus:bg-white transition-colors resize-none"
+                placeholder="Eklemek istediğiniz bir not var mı?" 
+              />
             </div>
-          </form>
-        </div>
-      </main>
+
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="w-full flex justify-center items-center py-4 px-6 border border-transparent rounded-xl shadow-xl shadow-blue-200 text-base font-bold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 transition-all transform hover:-translate-y-1 disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5" /> 
+                  Gönderiliyor...
+                </>
+              ) : (
+                'Bilgileri ve Pasaportu Gönder'
+              )}
+            </button>
+          </div>
+
+        </form>
+        
+        <p className="text-center text-sm text-slate-400 mt-4">
+          © 2025 ATA Accountancy. Bilgileriniz 256-bit SSL ile korunmaktadır.
+        </p>
+      </div>
     </div>
   )
 }
