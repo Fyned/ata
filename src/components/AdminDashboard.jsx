@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
-import { FileText, Calendar, Mail, Phone, ExternalLink, Loader2, LogOut, Lock } from 'lucide-react'
+import { FileText, Calendar, Mail, Phone, ExternalLink, Loader2, LogOut, Lock, MapPin } from 'lucide-react'
 
 export default function AdminDashboard() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [isAdmin, setIsAdmin] = useState(false) // Admin mi kontrolü
+  const [isAdmin, setIsAdmin] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [authError, setAuthError] = useState(null)
@@ -52,7 +52,7 @@ export default function AdminDashboard() {
 
       if (data && data.role === 'admin') {
         setIsAdmin(true)
-        fetchApplications() // Admin ise verileri çekmeye başla
+        fetchApplications()
       } else {
         setIsAdmin(false)
       }
@@ -89,7 +89,6 @@ export default function AdminDashboard() {
       setAuthError("Giriş başarısız: " + error.message)
       setLoading(false)
     }
-    // Başarılı olursa useEffect'teki onAuthStateChange yakalayacak
   }
 
   // 4. Çıkış Yap
@@ -170,7 +169,7 @@ export default function AdminDashboard() {
     )
   }
 
-  // --- EKRAN 3: Yetkisiz Giriş (Veritabanında rolü 'admin' değilse) ---
+  // --- EKRAN 3: Yetkisiz Giriş ---
   if (!isAdmin) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -217,31 +216,72 @@ export default function AdminDashboard() {
                   <tr>
                     <th className="px-6 py-4">Başvuru Sahibi</th>
                     <th className="px-6 py-4">İletişim</th>
+                    <th className="px-6 py-4">Adres</th> {/* Yeni Kolon */}
                     <th className="px-6 py-4">Tarih</th>
-                    <th className="px-6 py-4 text-right">İşlem</th>
+                    <th className="px-6 py-4 text-right">Belgeler</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {applications.map((app) => (
                     <tr key={app.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-4 font-semibold text-slate-900">{app.full_name}</td>
+                      
+                      {/* Ad Soyad */}
+                      <td className="px-6 py-4 font-semibold text-slate-900">
+                        {app.full_name}
+                        {app.notes && (
+                           <div className="text-xs text-slate-400 font-normal mt-1 truncate max-w-[150px]" title={app.notes}>Not: {app.notes}</div>
+                        )}
+                      </td>
+                      
+                      {/* İletişim */}
                       <td className="px-6 py-4">
                         <div className="flex flex-col text-xs text-slate-500 gap-1">
                           <span className="flex items-center gap-1"><Mail className="h-3 w-3"/> {app.email}</span>
                           {app.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3"/> {app.phone}</span>}
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-slate-500">{formatDate(app.created_at)}</td>
-                      <td className="px-6 py-4 text-right">
-                        <a 
-                          href={app.passport_url} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium bg-blue-50 px-3 py-1.5 rounded-md"
-                        >
-                          <FileText className="h-4 w-4" /> Pasaportu Gör <ExternalLink className="h-3 w-3" />
-                        </a>
+
+                      {/* Adres (Yeni Alan) */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-start gap-1 text-slate-600 max-w-[200px]">
+                          <MapPin className="h-3 w-3 mt-1 shrink-0 text-slate-400" />
+                          <span className="truncate" title={app.address}>{app.address || '-'}</span>
+                        </div>
                       </td>
+
+                      {/* Tarih */}
+                      <td className="px-6 py-4 text-slate-500 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          {formatDate(app.created_at)}
+                        </div>
+                      </td>
+
+                      {/* Belgeler (Pasaport ve Fatura) */}
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex justify-end gap-2">
+                          <a 
+                            href={app.passport_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-md text-xs transition-colors"
+                          >
+                            <FileText className="h-3 w-3" /> Pasaport
+                          </a>
+                          
+                          {app.bill_url && (
+                            <a 
+                              href={app.bill_url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-green-600 hover:text-green-800 font-medium bg-green-50 hover:bg-green-100 px-3 py-1.5 rounded-md text-xs transition-colors"
+                            >
+                              <FileText className="h-3 w-3" /> Fatura
+                            </a>
+                          )}
+                        </div>
+                      </td>
+
                     </tr>
                   ))}
                 </tbody>
