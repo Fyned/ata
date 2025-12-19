@@ -17,19 +17,20 @@ serve(async (req: any) => {
   }
 
   try {
-    // Yeni alanları (address, billUrl) da alıyoruz
-    const { fullName, email, phone, address, notes, passportUrl, billUrl } = await req.json()
+    const { fullName, email, phone, address, notes, passportUrl, billUrl, companyName } = await req.json()
 
     const { data, error } = await resend.emails.send({
       from: 'ATA Portal <onboarding@resend.dev>',
-      to: ['companyscanfiles@gmail.com'], // Yeni mail adresi
-      subject: `Yeni Başvuru: ${fullName}`,
+      to: ['companyscanfiles@gmail.com'], 
+      // KONU BAŞLIĞINDA FİRMA İSMİ YAZAR, KARIŞMAZ
+      subject: `Yeni Başvuru: ${companyName}`, 
       html: `
         <div style="font-family: sans-serif; padding: 20px; color: #333;">
-          <h2 style="color: #2563eb;">Yeni Başvuru Alındı</h2>
+          <h2 style="color: #2563eb;">Yeni Şirket Başvurusu</h2>
           
           <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-            <tr><td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Ad Soyad:</td><td style="padding: 10px; border-bottom: 1px solid #eee;">${fullName}</td></tr>
+            <tr><td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Firma İsmi:</td><td style="padding: 10px; border-bottom: 1px solid #eee;">${companyName}</td></tr>
+            <tr><td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Başvuran Ad Soyad:</td><td style="padding: 10px; border-bottom: 1px solid #eee;">${fullName}</td></tr>
             <tr><td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Email:</td><td style="padding: 10px; border-bottom: 1px solid #eee;">${email}</td></tr>
             <tr><td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Telefon:</td><td style="padding: 10px; border-bottom: 1px solid #eee;">${phone || '-'}</td></tr>
             <tr><td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Adres:</td><td style="padding: 10px; border-bottom: 1px solid #eee;">${address || '-'}</td></tr>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../supabase'
-import { Upload, CheckCircle, FileText, User, Mail, Phone, MapPin, Loader2, Globe, MessageCircle } from 'lucide-react'
+import { Upload, CheckCircle, FileText, User, Mail, Phone, MapPin, Loader2, Globe, MessageCircle, Briefcase } from 'lucide-react'
 
 export default function PassportForm() {
   const [loading, setLoading] = useState(false)
@@ -16,7 +16,8 @@ export default function PassportForm() {
       billLabel: "Proof of Address (Utility Bill)",
       uploadText: "Click to upload",
       changeText: "Change file",
-      fullName: "Full Name",
+      companyName: "Company Name (Mandatory)",
+      fullName: "Applicant Full Name",
       email: "Email Address",
       phone: "Phone Number",
       address: "Address",
@@ -43,7 +44,8 @@ export default function PassportForm() {
       billLabel: "Adres Kanıtı (Fatura)",
       uploadText: "Yüklemek için tıklayın",
       changeText: "Dosyayı değiştir",
-      fullName: "Ad Soyad",
+      companyName: "Firma İsmi (Zorunlu)",
+      fullName: "Başvuran Ad Soyad",
       email: "E-posta Adresi",
       phone: "Telefon Numarası",
       address: "Adres",
@@ -68,7 +70,14 @@ export default function PassportForm() {
   const text = t[lang]
 
   // Form Verileri
-  const [formData, setFormData] = useState({ fullName: '', email: '', phone: '', address: '', notes: '' })
+  const [formData, setFormData] = useState({ 
+    companyName: '', 
+    fullName: '', 
+    email: '', 
+    phone: '', 
+    address: '', 
+    notes: '' 
+  })
   
   // Dosya State'leri
   const [passportFile, setPassportFile] = useState(null)
@@ -100,6 +109,7 @@ export default function PassportForm() {
 
       // 2. Veritabanına Kaydet
       const { error: dbError } = await supabase.from('applications').insert([{
+        company_name: formData.companyName,
         full_name: formData.fullName,
         email: formData.email,
         phone: formData.phone,
@@ -114,6 +124,7 @@ export default function PassportForm() {
       // 3. Mail Gönder
       await supabase.functions.invoke('send-application-email', {
         body: {
+          companyName: formData.companyName,
           fullName: formData.fullName,
           email: formData.email,
           phone: formData.phone,
@@ -135,8 +146,7 @@ export default function PassportForm() {
 
   // --- BAŞARI EKRANI (POP-UP MESAJI) ---
   if (submitted) {
-    // WhatsApp Link Oluşturma
-    const whatsappNumber = "447831576850"
+    const whatsappNumber = "447388494588"
     const whatsappLink = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(text.whatsappMessage)}`
 
     return (
@@ -148,7 +158,6 @@ export default function PassportForm() {
           <h2 className="text-3xl font-bold text-slate-800 mb-2">{text.successTitle}</h2>
           <p className="text-slate-600 mb-8">{text.successMessage}</p>
           
-          {/* Önemli Uyarı Kutusu */}
           <div className="bg-blue-50 border-l-4 border-blue-500 p-6 rounded-r-lg text-left mb-8">
             <h3 className="text-blue-800 font-bold text-lg mb-2 flex items-center gap-2">
               <span className="text-2xl">⚠️</span> {text.important}
@@ -157,7 +166,6 @@ export default function PassportForm() {
               {text.instruction1}
             </p>
             
-            {/* WhatsApp Butonu */}
             <a 
               href={whatsappLink} 
               target="_blank" 
@@ -186,7 +194,6 @@ export default function PassportForm() {
     <div className="min-h-screen w-full bg-slate-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-4xl w-full space-y-8 bg-white p-8 sm:p-12 rounded-3xl shadow-2xl border border-slate-200 relative">
         
-        {/* Dil Değiştirme Butonu */}
         <button 
           onClick={() => setLang(lang === 'en' ? 'tr' : 'en')}
           className="absolute top-6 right-6 flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-full text-sm font-semibold transition-colors text-slate-700 z-10"
@@ -195,7 +202,6 @@ export default function PassportForm() {
           {lang === 'en' ? '🇹🇷 Türkçe' : '🇬🇧 English'}
         </button>
 
-        {/* Header */}
         <div className="text-center">
           <div className="flex justify-center mb-6">
              <div className="h-20 w-20 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 transform rotate-3">
@@ -213,7 +219,6 @@ export default function PassportForm() {
             {/* SOL KOLON: DOSYA YÜKLEME */}
             <div className="space-y-6">
               
-              {/* 1. Pasaport */}
               <div className="space-y-2">
                 <label className="block text-sm font-bold text-slate-700">{text.passportLabel} <span className="text-red-500">*</span></label>
                 <div className={`h-40 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center text-center p-4 transition-all cursor-pointer ${passportFile ? 'border-green-500 bg-green-50' : 'border-slate-300 hover:border-blue-500 hover:bg-slate-50'}`}>
@@ -228,7 +233,6 @@ export default function PassportForm() {
                 </div>
               </div>
 
-              {/* 2. Fatura (Adres Kanıtı) */}
               <div className="space-y-2">
                 <label className="block text-sm font-bold text-slate-700">{text.billLabel} <span className="text-red-500">*</span></label>
                 <div className={`h-40 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center text-center p-4 transition-all cursor-pointer ${billFile ? 'border-green-500 bg-green-50' : 'border-slate-300 hover:border-blue-500 hover:bg-slate-50'}`}>
@@ -245,8 +249,26 @@ export default function PassportForm() {
 
             </div>
 
-            {/* SAĞ KOLON: KİŞİSEL BİLGİLER */}
+            {/* SAĞ KOLON: BİLGİLER */}
             <div className="space-y-5">
+              
+              {/* FIRMA İSMİ (EN ÜSTTE VE ZORUNLU) */}
+              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                <label className="block text-sm font-bold text-blue-900 mb-2">{text.companyName} <span className="text-red-500">*</span></label>
+                <div className="relative">
+                  <Briefcase className="absolute left-3 top-3.5 h-5 w-5 text-blue-500" />
+                  <input 
+                    type="text" 
+                    name="companyName" 
+                    required 
+                    value={formData.companyName} 
+                    onChange={handleChange} 
+                    className="block w-full pl-10 pr-3 py-3 border border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white font-semibold text-slate-800"
+                    placeholder="LTD Şirket İsmi" 
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">{text.fullName} <span className="text-red-500">*</span></label>
                 <div className="relative">
@@ -271,7 +293,6 @@ export default function PassportForm() {
                 </div>
               </div>
 
-              {/* Yeni Adres Alanı */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">{text.address} <span className="text-red-500">*</span></label>
                 <div className="relative">
